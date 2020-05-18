@@ -1,12 +1,12 @@
-from pprika import PPrika, request
+from test_app import create_app
 
-app = PPrika()
+app = create_app()
 
 
 @app.route('/index')
 @app.route('/home')
 def index():
-    print(type(request), request, request.args)
+    # print(type(request), request, request.args)
     return '<h1>Hello 世界!</h1>', 233, [('Content-type', 'text/html;charset=utf-8')]
 
 

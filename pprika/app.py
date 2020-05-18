@@ -1,26 +1,21 @@
 from werkzeug.serving import run_simple
-from werkzeug.wrappers import Response, BaseResponse
 from werkzeug.routing import Map, Rule
 from .context import RequestContext, _req_ctx_ls
-from werkzeug.datastructures import Headers
-from json import dumps
-from functools import partial
-
-json_config = {'ensure_ascii': False, 'indent': None, 'separators': (',', ':')}
-compact_dumps = partial(dumps, **json_config)
+from .helpers import make_response
 
 
 class PPrika(object):
     def __init__(self):
         self.url_map = Map()
         self.view_functions = {}  # endpoint: view_func
+        self.blueprints = {}  # bp_name: blueprint
 
     def wsgi_app(self, environ, start_response):
         ctx = RequestContext(self, environ)
         try:
             ctx.bind()
             rv = self.dispatch_request()
-            response = self.make_response(rv)
+            response = make_response(rv)
             return response(environ, start_response)
         finally:
             ctx.unbind()
@@ -63,37 +58,13 @@ class PPrika(object):
         endpoint, args = _req_ctx_ls.ctx.url_adapter.match()
         return self.view_functions[endpoint](**args)
 
-    def make_response(self, rv=None):
-        status = headers = None
-
-        if isinstance(rv, BaseResponse):
-            return rv
-
-        if isinstance(rv, tuple):
-            len_rv = len(rv)
-            if len_rv == 3:
-                rv, status, headers = rv
-            elif len_rv == 2:
-                if isinstance(rv[1], (Headers, dict, tuple, list)):
-                    rv, headers = rv
-                else:
-                    rv, status = rv
-            elif len_rv == 1:
-                rv = rv[0]
-            else:
-                raise TypeError(
-                    '视图函数返回值若为tuple至少要有响应体body，'
-                    '可选status与headers，如(body, status, headers)'
-                )
-
-        if isinstance(rv, dict):
-            rv = compact_dumps(rv)
-            headers = Headers(headers)
-            headers.setdefault('Content-type', 'application/json')
-        elif rv is None:
-            pass
-        elif not isinstance(rv, (str, bytes, bytearray)):
-            raise TypeError(f'视图函数返回的响应体类型非法:{type(rv)}')
-
-        response = Response(rv, status=status, headers=headers)
-        return response
+    def register_blueprint(self, blueprint, **options):
+        bp_name = blueprint.name
+        if bp_name in self.blueprints:
+            assert blueprint is self.blueprints[bp_name], f"""
+                已存在名为 {bp_name} 的blueprints：{self.blueprints[bp_name]}，
+                请确保正在创建的 {blueprint} 名称唯一
+            """
+        else:
+            self.blueprints[bp_name] = blueprint
+        blueprint.register(self, options)

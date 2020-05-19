@@ -1,7 +1,8 @@
 from . import main
 
 
-@main.route('/mao', 'hei')
+@main.route('/mao', endpoint='hei')
+@main.route('/cat', methods=['GET', 'POST'])
 def get_ero():
     return '喵喵!!喵喵喵喵是猫'
 

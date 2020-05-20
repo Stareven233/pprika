@@ -4,4 +4,4 @@ main = Blueprint('main', '/')
 # the __name__ in main.__init__:  test_app.main
 
 
-from . import views
+from . import views, errors

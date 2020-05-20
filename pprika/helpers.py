@@ -2,15 +2,20 @@ from json import dumps
 from functools import partial
 from werkzeug.wrappers import Response, BaseResponse
 from werkzeug.datastructures import Headers
+from werkzeug.exceptions import HTTPException
 
 json_config = {'ensure_ascii': False, 'indent': None, 'separators': (',', ':')}
 compact_dumps = partial(dumps, **json_config)
 
 
 def make_response(rv=None):
+    """
+    rv为视图函数返回值(body, status, headers)三元组、或响应实例
+    将返回Response对象实例
+    """
     status = headers = None
 
-    if isinstance(rv, BaseResponse):
+    if isinstance(rv, (BaseResponse, HTTPException)):
         return rv
 
     if isinstance(rv, tuple):
@@ -37,7 +42,7 @@ def make_response(rv=None):
     elif rv is None:
         pass
     elif not isinstance(rv, (str, bytes, bytearray)):
-        raise TypeError(f'视图函数返回的响应体类型非法:{type(rv)}')
+        raise TypeError(f'视图函数返回的响应体类型非法: {type(rv)}')
 
     response = Response(rv, status=status, headers=headers)
     return response

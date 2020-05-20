@@ -1,7 +1,10 @@
 from werkzeug.serving import run_simple
 from werkzeug.routing import Map, Rule
-from .context import RequestContext, _req_ctx_ls
+from .context import RequestContext, request
 from .helpers import make_response
+from werkzeug.exceptions import default_exceptions
+from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import InternalServerError
 
 
 class PPrika(object):
@@ -25,9 +28,12 @@ class PPrika(object):
         """
         ctx = RequestContext(self, environ)
         try:
-            ctx.bind()
-            rv = self.dispatch_request()
-            response = make_response(rv)
+            try:
+                ctx.bind()
+                rv = self.dispatch_request()
+                response = make_response(rv)
+            except Exception as e:
+                response = self.handle_exception(e)
             return response(environ, start_response)
         finally:
             ctx.unbind()
@@ -85,10 +91,18 @@ class PPrika(object):
         接受 'wsgi_app'的调用，通过请求上下文进行url匹配，得到对应endpoint与函数参数args
         再以endpoint作为键值得到处理该url的视图函数，传入args，返回函数结果
         """
-        endpoint, args = _req_ctx_ls.ctx.url_adapter.match()
-        return self.view_functions[endpoint](**args)
+        if request.routing_exception is not None:
+            return self.handle_user_exception(request.routing_exception)
+        # 'url_adapter.match' 时可能产生的路由错误
 
-    def register_blueprint(self, blueprint, **options):
+        try:
+            endpoint, args = request.endpoint, request.view_args
+            rv = self.view_functions[endpoint](**args)
+        except Exception as e:
+            rv = self.handle_user_exception(e)
+        return rv
+
+    def register_blueprint(self, blueprint):
         """
         接收blueprint实例，通过其register方法实现注册
         需保证注册的blueprint名都唯一
@@ -101,7 +115,114 @@ class PPrika(object):
             """
         else:
             self.blueprints[bp_name] = blueprint
-        blueprint.register(self, options)
+        blueprint.register(self)
 
-    def register_error_handler(self, bp_name, code_or_exception, func):
-        pass
+    @staticmethod
+    def _get_exc_class_and_code(exc_class_or_code):
+        """
+        根据 status code 或 exception class 自动补出另一个
+        若default_exceptions无code对应的类则报错
+        """
+        if isinstance(exc_class_or_code, int):
+            try:
+                exc_class = default_exceptions[exc_class_or_code]
+            except KeyError:
+                raise KeyError(f"""
+                    {exc_class_or_code} 并非标准的HTTP错误码，
+                    请用HTTPException构造自定义的HTTP错误
+                """)
+        else:
+            exc_class = exc_class_or_code
+
+        assert issubclass(exc_class, Exception)
+
+        if issubclass(exc_class, HTTPException) and exc_class.code:
+            return exc_class, exc_class.code
+        else:
+            return exc_class, None
+
+    def _find_error_handler(self, e):
+        """
+        按照code优先、蓝图次要的顺序为寻找异常处理函数：
+        蓝图 with code，全局 with code
+        蓝图 without code，全局 without code
+        若没有匹配的处理函数则返回None
+        """
+        exc_class, code = self._get_exc_class_and_code(type(e))
+
+        for field, c in (
+                (request.blueprint, code),
+                (None, code),
+                (request.blueprint, None),
+                (None, None),
+        ):
+            handler_map = self.error_handlers.setdefault(field, {}).get(c)
+
+            if not handler_map:
+                continue
+
+            for cls in exc_class.__mro__:
+                handler = handler_map.get(cls)
+                if handler is not None:
+                    return handler
+
+    def register_error_handler(self, code_or_exception, func, field=None):
+        """
+        通过status code 或 Exception class注册一个错误处理函数func
+        func被调用时接受该异常实例作为参数
+        其中field为None时作用于全局(app)；为str时是蓝图名，仅作用于该蓝图(blueprint)
+        """
+        if isinstance(code_or_exception, Exception):
+            raise ValueError(f"""
+                不可注册异常实例: {repr(code_or_exception)}，
+                只能是异常类或HTTP错误码
+            """)
+
+        exc_class, code = self._get_exc_class_and_code(code_or_exception)
+
+        handlers = self.error_handlers.setdefault(field, {}).setdefault(code, {})
+        handlers[exc_class] = func
+
+    def error_handler(self, code_or_exception):
+        """
+        register_error_handler的全局装饰器版本
+        """
+        def wrapper(func):
+            self.register_error_handler(code_or_exception, func)
+            return func
+        return wrapper
+
+    def handle_user_exception(self, e):
+        """
+        处理所有注册过的异常，如果未注册则再抛出
+        而HTTPException及其子类实例可直接作为响应返回
+        """
+        handler = self._find_error_handler(e)
+
+        if handler is not None:
+            return handler(e)
+        if isinstance(e, HTTPException):
+            return e
+
+        raise e
+
+    def handle_exception(self, e):
+        """
+        处理无对应处理函数或处理函数中再次抛出的异常
+        将统一返回 500 ``InternalServerError`` 响应
+        """
+        if isinstance(e, HTTPException):
+            return e
+        # todo 之后还是为所有HTTPException添加默认处理，
+        #  在handle_user_exception里解决，使之满足restful格式(返回json)，
+        #  且优先级应低于用户自主设置的
+
+        server_error = InternalServerError()
+        server_error.original_exception = e
+
+        handler = self._find_error_handler(server_error)
+        if handler is not None:
+            server_error = handler(server_error)
+
+        return make_response(server_error)
+

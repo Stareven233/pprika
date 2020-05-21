@@ -1,6 +1,8 @@
 class Blueprint(object):
     """
     蓝图，与app一样进行路由绑定，但url会加上前缀以示区分
+    url_prefix：可以与其他蓝图/app绑定同样的
+    name：需要唯一
     需要在app中调用 'register_blueprint' 将路由信息注册到app上
     """
     def __init__(self, name, url_prefix=None):
@@ -16,7 +18,7 @@ class Blueprint(object):
         简单起见，注册时url_prefix不可再变
         """
         for f in self.deferred_funcs:  # 注册一些需要app的函数
-            f(app)  # todo 要实现注册时url_prefix还是得加一层BlueprintState
+            f(app)  # 要实现注册时更改url_prefix得加一层BlueprintState
 
     def add_url_rule(self, path, endpoint=None, view_func=None, **options):
         """
@@ -46,5 +48,35 @@ class Blueprint(object):
         def wrapper(func):
             endpoint = options.pop("endpoint", None)
             self.add_url_rule(path, endpoint, func, **options)
+            return func
+        return wrapper
+
+    def register_error_handler(self, code_or_exception, func):
+        """
+        注册错误处理器，仅作用于当前blueprint的请求
+        """
+        self.deferred_funcs.append(
+            lambda a: a.register_error_handler(code_or_exception, func, self.name)
+        )
+
+    def error_handler(self, code_or_exception):
+        """
+        register_error_handler的装饰器版本
+        """
+        def wrapper(func):
+            self.deferred_funcs.append(
+                lambda a: a.register_error_handler(code_or_exception, func, self.name)
+            )
+            return func
+        return wrapper
+
+    def app_error_handler(self, code_or_exception):
+        """
+        注册错误处理器，作用于所有请求
+        """
+        def wrapper(func):
+            self.deferred_funcs.append(
+                lambda a: a.error_handler(code_or_exception)(func)
+            )
             return func
         return wrapper

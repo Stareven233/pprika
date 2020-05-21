@@ -19,6 +19,7 @@ class PPrika(object):
         self.view_functions = {}  # {endpoint: view_func}
         self.blueprints = {}  # {bp_name: blueprint}
         self.error_handlers = {}  # {bp_name: {status: {error: function}}}
+        self.api_set = set()  # {bp_name, bp_name, ...}
 
     def wsgi_app(self, environ, start_response):
         """
@@ -156,6 +157,10 @@ class PPrika(object):
                 (request.blueprint, None),
                 (None, None),
         ):
+            if request.blueprint in self.api_set and not field:
+                continue
+            # .restful.Api 仅使用自身设置的错误处理器
+
             handler_map = self.error_handlers.setdefault(field, {}).get(c)
 
             if not handler_map:
@@ -198,31 +203,23 @@ class PPrika(object):
         而HTTPException及其子类实例可直接作为响应返回
         """
         handler = self._find_error_handler(e)
-
         if handler is not None:
             return handler(e)
-        if isinstance(e, HTTPException):
-            return e
-
         raise e
 
     def handle_exception(self, e):
         """
         处理无对应处理函数或处理函数中再次抛出的异常
-        将统一返回 500 ``InternalServerError`` 响应
+        非HTTPException将统一返回 500 ``InternalServerError`` 响应
         """
         if isinstance(e, HTTPException):
             return e
-        # todo 之后还是为所有HTTPException添加默认处理，
-        #  在handle_user_exception里解决，使之满足restful格式(返回json)，
-        #  且优先级应低于用户自主设置的
 
         server_error = InternalServerError()
         server_error.original_exception = e
 
-        handler = self._find_error_handler(server_error)
+        handler = self._find_error_handler(e) or self._find_error_handler(server_error)
         if handler is not None:
             server_error = handler(server_error)
 
         return make_response(server_error)
-

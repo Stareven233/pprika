@@ -14,7 +14,7 @@ class ApiException(Exception):
 
     可重写 'get_response' 并将自定义子类在初始化Api时作为参数传入，定制错误处理响应格式
     如 api = Api('api', exception_cls=CustomException)
-    注意：响应中需要的自定义属性应当在__init__中初始化
+    注意：添加的自定义属性都应当在__init__中初始化
     """
 
     status = None
@@ -26,7 +26,7 @@ class ApiException(Exception):
             self.message = message
 
     def get_response(self):
-        body = {'msg': self.message}
+        body = {'message': self.message}
         rv = body, self.status
         return make_response(rv)
 

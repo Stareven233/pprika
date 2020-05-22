@@ -97,7 +97,7 @@ class PPrika(object):
         # 'url_adapter.match' 时可能产生的路由错误
 
         try:
-            endpoint, args = request.endpoint, request.view_args
+            endpoint, args = request.rule.endpoint, request.view_args
             rv = self.view_functions[endpoint](**args)
         except Exception as e:
             rv = self.handle_user_exception(e)

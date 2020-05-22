@@ -17,17 +17,17 @@ request = LocalProxy(_get_req_object)
 
 class Request(BaseRequest):
     def __init__(self, environ):
-        self.endpoint = None
+        self.rule = None
         self.view_args = None
         self.blueprint = None
         self.routing_exception = None
         super().__init__(environ)
 
     def __load__(self, res):
-        self.endpoint, self.view_args = res
+        self.rule, self.view_args = res
 
-        if self.endpoint and "." in self.endpoint:
-            self.blueprint = self.endpoint.rsplit(".", 1)[0]
+        if self.rule and "." in self.rule.endpoint:
+            self.blueprint = self.rule.endpoint.rsplit(".", 1)[0]
 
 
 class RequestContext(object):
@@ -45,7 +45,7 @@ class RequestContext(object):
 
     def match_request(self):
         try:
-            res = self.url_adapter.match()
+            res = self.url_adapter.match(return_rule=True)
             self.request.__load__(res)
         except HTTPException as e:
             self.request.routing_exception = e

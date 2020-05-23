@@ -5,6 +5,8 @@ from .helpers import make_response
 from werkzeug.exceptions import default_exceptions
 from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import InternalServerError
+from sys import exc_info
+from traceback import print_exception
 
 
 class PPrika(object):
@@ -209,7 +211,7 @@ class PPrika(object):
 
     def handle_exception(self, e):
         """
-        处理无对应处理函数或处理函数中再次抛出的异常
+        处理无对应处理函数或处理函数中再次发生的异常
         非HTTPException将统一返回 500 ``InternalServerError`` 响应
         """
         if isinstance(e, HTTPException):
@@ -221,5 +223,7 @@ class PPrika(object):
         handler = self._find_error_handler(e) or self._find_error_handler(server_error)
         if handler is not None:
             server_error = handler(server_error)
+        else:
+            print_exception(*exc_info())
 
         return make_response(server_error)

@@ -3,6 +3,8 @@ from functools import partial
 from .context import request
 from .helpers import make_response
 from werkzeug.exceptions import HTTPException
+from sys import exc_info
+from traceback import print_exception
 
 
 class ApiException(Exception):
@@ -21,9 +23,8 @@ class ApiException(Exception):
     message = None
 
     def __init__(self, status=None, message=None):
-        if status and message:
-            self.status = status
-            self.message = message
+        self.status = status or self.status
+        self.message = message or self.message
 
     def get_response(self):
         body = {'message': self.message}
@@ -48,11 +49,11 @@ class Api(Blueprint):
         super().__init__(name, url_prefix)
         if exception_cls is not None:
             self.exception_cls = exception_cls
-        self.deferred_funcs.append(lambda a: self._init_app(a))
+        self._deferred_funcs.append(lambda a: self._init_app(a))
 
     def _init_app(self, app):
         if not app.api_set:
-            app.handle_user_exception = partial(self._error_router, app.handle_exception)
+            app.handle_exception = partial(self._error_router, app.handle_exception)
             # 若自身未设置对应错误处理器，则错误由handle_user_exception中再抛出
         app.api_set.add(self.name)
 
@@ -71,11 +72,13 @@ class Api(Blueprint):
         """
         若错误来自本api，则完全替代 'app.handle_exception'
         处理所有的错误，以统一的json格式响应
+        但404这类路由错误是全局的，不会在此处理
         """
         if isinstance(e, self.exception_cls):
             pass
         elif isinstance(e, HTTPException):
             e = self.exception_cls(e.code, e.description)
         else:
-            e = self.exception_cls(500, str(e))
+            print_exception(*exc_info())
+            e = self.exception_cls(500, repr(e))
         return e.get_response()

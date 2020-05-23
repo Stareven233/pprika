@@ -1,6 +1,7 @@
 from werkzeug.local import LocalProxy, Local
 from werkzeug.wrappers import Request as BaseRequest
 from werkzeug.exceptions import HTTPException
+from json import loads
 
 
 def _get_req_object():
@@ -28,6 +29,11 @@ class Request(BaseRequest):
 
         if self.rule and "." in self.rule.endpoint:
             self.blueprint = self.rule.endpoint.rsplit(".", 1)[0]
+
+    @property
+    def json(self):
+        if self.data and self.mimetype == 'application/json':
+            return loads(self.data)
 
 
 class RequestContext(object):

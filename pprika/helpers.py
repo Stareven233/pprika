@@ -35,7 +35,7 @@ def make_response(rv=None):
                 '可选status与headers，如(body, status, headers)'
             )
 
-    if isinstance(rv, dict):
+    if isinstance(rv, (dict, list)):
         rv = compact_dumps(rv)
         headers = Headers(headers)
         headers.setdefault('Content-type', 'application/json')

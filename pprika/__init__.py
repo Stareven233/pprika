@@ -4,4 +4,6 @@ from .helpers import compact_dumps
 from .helpers import make_response
 from .blueprint import Blueprint
 from .restful import Api
+from .restful import ApiException
+from .restful import Resource
 from werkzeug.exceptions import abort

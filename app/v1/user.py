@@ -6,37 +6,42 @@ from ..exception import NotFound
 from ..exception import PwdError
 from .. import db
 from ..auth import generate_token
+from pprika import Resource
 
 
-@v1.route('/users/register', methods='POST')
-def register():
-    data = request.json
-    name, pwd = data.get('name'), data.get('password')
+class Register(Resource):
+    def post(self):
+        data = request.json
+        name, pwd = data.get('name'), data.get('password')
 
-    if not name or not pwd:
-        raise LackOfInfo()
-    if name in db['users']:
-        raise UserAlreadyExist()
+        if not name or not pwd:
+            raise LackOfInfo()
+        if name in db['users']:
+            raise UserAlreadyExist()
 
-    data['uid'] = len(db['users']) + 1
-    db['users'][name] = data
+        data['uid'] = len(db['users']) + 1
+        db['users'][name] = data
 
-    return response(data)
+        return response(data)
 
 
-@v1.route('/users/token')
-def login():
-    data = request.headers
-    name, pwd = data.get('name'), data.get('password')
+class Login(Resource):
+    def get(self):
+        data = request.headers
+        name, pwd = data.get('name'), data.get('password')
 
-    if not name or not pwd:
-        raise LackOfInfo()
+        if not name or not pwd:
+            raise LackOfInfo()
 
-    if name not in db['users']:
-        raise NotFound(message='不存在该用户，请先注册')
+        if name not in db['users']:
+            raise NotFound(message='不存在该用户，请先注册')
 
-    if pwd != db['users'][name]['password']:
-        raise PwdError()
+        if pwd != db['users'][name]['password']:
+            raise PwdError()
 
-    token = generate_token(name)
-    return response(token)
+        token = generate_token(name)
+        return response(token)
+
+
+v1.add_resource(Register, '/users/register')
+v1.add_resource(Login, '/users/token')

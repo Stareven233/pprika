@@ -3,6 +3,7 @@ from functools import partial
 from .context import request
 from .helpers import make_response
 from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import MethodNotAllowed
 from sys import exc_info
 from traceback import print_exception
 
@@ -82,3 +83,54 @@ class Api(Blueprint):
             print_exception(*exc_info())
             e = self.exception_cls(500, repr(e))
         return e.get_response()
+
+    def add_resource(self, resource, path, **kwargs):
+        """
+        将Resource的子类解析后作为路由规则加入
+        用法同 flask-restful 但更简单(简陋)
+        """
+        endpoint = kwargs.pop('endpoint', None) or resource.__name__.lower()
+        view_func = resource.as_view
+
+        for decorator in resource.decorators:
+            view_func = decorator(view_func)
+
+        if not kwargs.get('methods'):
+            kwargs['methods'] = resource.get_views()
+
+        self.add_url_rule(path, endpoint, view_func, **kwargs)
+
+
+class Resource(object):
+    """
+    汇集同一路由下对应不同method的视图函数
+
+    用法：继承该类，并添加与method同名的视图函数作为其方法
+    将视图函数的装饰器作为列表赋给 cls.decorators，对该Resource内所有方法都适用
+
+    注意：当被路由时若无对应method的方法将引发 405 Method Not Allowed
+    且类里除了视图函数以外不宜有其他方法，尤其是名字里带下划线 "_" 的
+    该类初始化(__init__调用时)暂不支持传参
+    """
+    decorators = []
+
+    @classmethod
+    def get_views(cls):
+        """以列表形式返回该类里所有视图函数名(即get, post等methods)"""
+        return list(filter(lambda m: '_' not in m and callable(getattr(cls, m)), dir(cls)))
+
+    @classmethod
+    def as_view(cls, *args, **kwargs):
+        """
+        算是视图函数的代理，被调用时会将所有参数转给对应方法的真正处理函数
+        """
+        method = request.method.lower()
+
+        func = getattr(cls, method, None)
+        if func is None and method == 'head':
+            func = getattr(cls, 'get', None)
+
+        if func is None:
+            raise MethodNotAllowed()
+
+        return func(cls(), *args, **kwargs)

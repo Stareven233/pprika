@@ -9,4 +9,4 @@ def index():
 
 
 if __name__ == '__main__':
-    app.run('localhost', 9000, use_debugger=True)  # 垃圾chrome拒绝请求6000端口
+    app.run('localhost', 9000, use_debugger=True)

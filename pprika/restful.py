@@ -6,6 +6,8 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.exceptions import MethodNotAllowed
 from sys import exc_info
 from traceback import print_exception
+from werkzeug.datastructures import FileStorage
+from decimal import Decimal
 
 
 class ApiException(Exception):
@@ -33,6 +35,11 @@ class ApiException(Exception):
         return make_response(rv)
 
     def __str__(self):
+        status = self.status or "???"
+        msg = self.message or "Unknown Error"
+        return "<%s '%s: %s'>" % (self.__class__.__name__, status, msg)
+
+    def __repr__(self):
         status = self.status or "???"
         msg = self.message or "Unknown Error"
         return "<%s '%s: %s'>" % (self.__class__.__name__, status, msg)
@@ -73,12 +80,14 @@ class Api(Blueprint):
         """
         若错误来自本api，则完全替代 'app.handle_exception'
         处理所有的错误，以统一的json格式响应
-        但404这类路由错误是全局的，不会在此处理
+        但404、405这类路由错误是全局的，不会在此处理
         """
         if isinstance(e, self.exception_cls):
             pass
         elif isinstance(e, HTTPException):
             e = self.exception_cls(e.code, e.description)
+        elif isinstance(e, ApiException):
+            e = self.exception_cls(e.status, e.message)
         else:
             print_exception(*exc_info())
             e = self.exception_cls(500, repr(e))
@@ -108,7 +117,7 @@ class Resource(object):
     用法：继承该类，并添加与method同名的视图函数作为其方法
     将视图函数的装饰器作为列表赋给 cls.decorators，对该Resource内所有方法都适用
 
-    注意：当被路由时若无对应method的方法将引发 405 Method Not Allowed
+    注意：当被路由时若无对应method的方法将自动引发 405 Method Not Allowed
     且类里除了视图函数以外不宜有其他方法，尤其是名字里带下划线 "_" 的
     该类初始化(__init__调用时)暂不支持传参
     """
@@ -123,6 +132,7 @@ class Resource(object):
     def as_view(cls, *args, **kwargs):
         """
         算是视图函数的代理，被调用时会将所有参数转给对应方法的真正处理函数
+        404/405等路由错误在 url_rule.match 时就发生，无需也无法在此处理
         """
         method = request.method.lower()
 
@@ -130,7 +140,189 @@ class Resource(object):
         if func is None and method == 'head':
             func = getattr(cls, 'get', None)
 
-        if func is None:
-            raise MethodNotAllowed()
-
         return func(cls(), *args, **kwargs)
+
+
+class Namespace(dict):
+    """支持以属性的方式调用的字典"""
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        self[name] = value
+
+
+_friendly_location = {
+    u'json': u'the JSON body',
+    u'form': u'the post body',
+    u'args': u'the query string',
+    u'values': u'the post body or the query string',
+    u'headers': u'the HTTP headers',
+    u'cookies': u'the request\'s cookies',
+    u'files': u'an uploaded file',
+}
+
+
+class Argument(object):
+    """
+    对某一请求参数格式要求的抽象
+    调用parse方法可以获得按要求解析的值
+    """
+
+    def __init__(self, name, dest=None, default=None, required=False,
+                 type=str, location=('json', 'values',), nullable=True):
+        self.name = name
+        self.dest = dest
+        self.default = default
+        self.required = required
+        self.type = type
+        self.location = (location,) if isinstance(location, str) else location
+        self.nullable = nullable
+
+    def __str__(self):
+        return f"Argument 'name: {self.name}, type: {self.type}'"
+
+    def convert(self, value):
+        """按self.type尝试对传入的value进行转化"""
+
+        if value is None:
+            if not self.nullable:
+                raise ValueError('该参数不可为null')
+            else:
+                return None
+        elif isinstance(value, FileStorage) and self.type == FileStorage:
+            return value
+
+        if self.type is Decimal:
+            return self.type(str(value))
+        else:
+            return self.type(value)
+
+    def handle_validation_error(self, error, bundle_errors):
+        """根据bundle_errors决定抛出异常或将其返回收集"""
+
+        msg = {self.name: str(error)}
+        if bundle_errors:
+            return error, msg
+        raise ApiException(status=400, message=msg)
+
+    def parse(self, req, bundle_errors=False):
+        """根据全局变量request解析参数，也可将自定义的request作为参数req传入"""
+
+        values = []  # 同一个loc、多个loc都可能造成一键多值
+        result = None  # 但仅返回所有合法值的最后一个
+
+        for loc in self.location:
+            value = getattr(req, loc, None)
+
+            if callable(value):
+                value = value()
+            if not value:  # 该location无任何参数
+                continue
+
+            if hasattr(value, "getlist"):  # 此时value为MultiDict
+                value = value.getlist(self.name)  # 返回列表
+            else:
+                value = value.get(self.name)
+                value = [value] if value else []  # value为一般dict
+
+            req.arg_keys.discard(self.name)
+            # 将处理过的参数删去，便于 parse_args 判断请求是否带有多余参数
+            values.extend(value)
+            # value为None说明请求中该name对应的value就是None
+
+        for value in values:
+            try:
+                value = self.convert(value)
+            except Exception as e:
+                return self.handle_validation_error(e, bundle_errors)
+            result = value or result
+
+        if not result and self.required:  # 必需参数缺失
+            locations = [_friendly_location.get(loc, loc) for loc in self.location]
+            msg = f"Missing in {' or '.join(locations)}"
+            return self.handle_validation_error(KeyError(msg), bundle_errors)
+
+        if not result:  # 非必需缺失，以默认值代替
+            if callable(self.default):
+                return self.default(), None
+            else:
+                return self.default, None
+        return result, None  # None表示无错误信息
+
+
+class RequestParser(object):
+    """
+    类似于flask-restful的同名类，提供方便的参数添加与解析
+    :param bundle_errors：是否等待所有error产生再统一抛出
+    """
+
+    def __init__(self, bundle_errors=True):
+        self.args = []
+        self.bundle_errors = bundle_errors
+
+    @staticmethod
+    def get_all_args(req):
+        """
+        返回 req 所有参数的key，之后每parse一个就弹出
+        若最后不为空则说明请求中含有多余的参数
+        """
+
+        arg_keys = set()
+        for loc in ['json', 'values', 'files']:
+            value = getattr(req, loc, None)
+
+            if not value:
+                continue
+
+            if hasattr(value, 'keys'):
+                for arg in value.keys():
+                    arg_keys.add(arg)
+        return arg_keys
+
+    def add_argument(self, name, **kwargs):
+        """
+        添加一个参数以待解析
+        注意：在视图函数中add的参数对其他视图无影响，因为每次请求Api实例都重新构造
+
+        :param name：可以是参数名或Argument实例
+        """
+
+        if isinstance(name, Argument):
+            self.args.append(name)
+        else:
+            self.args.append(Argument(name, **kwargs))
+
+        return self
+
+    def parse_args(self, req=request, strict=False, http_error_code=400):
+        """
+        从req中解析所有添加的参数，并以Namespace(可看作dict)返回
+
+        :param req: 覆盖原有的全局request进行参数解析
+        :param strict: 若req未提供必需的参数，则抛出 BadRequest 400 错误
+        :param http_error_code：bundle_errors为True时使用的默认错误码
+        """
+
+        namespace = Namespace()
+        errors = {}
+        req.arg_keys = self.get_all_args(req)
+
+        for arg in self.args:
+            value, msg = arg.parse(req, self.bundle_errors)  # 若bundle_errors为False，异常将直接抛出
+
+            if not isinstance(value, BaseException):
+                namespace[arg.dest or arg.name] = value
+            else:  # ValueError: value非法(如None)，等其他异常
+                errors.update(msg)
+
+        if errors:
+            raise ApiException(status=http_error_code, message=errors)  # errors将以json响应
+        if strict and req.arg_keys:
+            msg = '未知参数: %s' % ', '.join(req.arg_keys)
+            raise ApiException(status=400, message=msg)
+
+        return namespace

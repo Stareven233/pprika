@@ -6,4 +6,5 @@ from .blueprint import Blueprint
 from .restful import Api
 from .restful import ApiException
 from .restful import Resource
+from .restful import RequestParser
 from werkzeug.exceptions import abort

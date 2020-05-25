@@ -7,6 +7,7 @@ from ..exception import NotFound
 from ..exception import PrivateVoice
 from ..auth import login_required
 from pprika import Resource
+from pprika import RequestParser
 
 """
 request:
@@ -28,9 +29,14 @@ uname: 发言者name
 class VoiceList(Resource):
     decorators = [login_required]
 
+    def __init__(self):
+        self.reqparse = RequestParser()
+
     def get(self):
-        vid = int(request.args.get('vid') or -1)
-        ps = 3
+        self.reqparse.add_argument('vid', type=int, default=-1, location='args')
+        self.reqparse.add_argument('ps', type=int, default=3, location='args')
+        args = self.reqparse.parse_args(strict=True)
+        vid, ps = args['vid'], args['ps']
 
         voices = db.get('voices', [])
         v_len = len(voices)
@@ -49,9 +55,11 @@ class VoiceList(Resource):
         return response(data)
 
     def post(self):
-        data = request.json
+        self.reqparse.add_argument('voice', type=str, required=True, location='json')
+        self.reqparse.add_argument('private', type=int, default=0, location='json')
+        data = self.reqparse.parse_args(strict=True)
 
-        if '敏感词汇' in data['voice']:
+        if '敏感词汇' in data.voice:
             raise ForbiddenWord()
 
         data['date'] = str(datetime.now())
@@ -80,6 +88,10 @@ class Voice(Resource):
         return response(voice), 200
 
     def put(self, vid):
+        reqparse = RequestParser()
+        reqparse.add_argument('private', type=int, default=0, location='json')
+        args = reqparse.parse_args()
+
         vid -= 1
         voices = db.get('voices', [])
 
@@ -91,8 +103,11 @@ class Voice(Resource):
         if voice['uname'] != db['g']['user']['name']:
             raise PrivateVoice(message='不可修改其他用户的voice')
 
-        voice = voices[vid] = request.json
-        return response(voice), 200
+        data = voices[vid]
+        data['date'] = str(datetime.now())
+        data.update(args)
+
+        return response(data), 200
 
     def delete(self, vid):
         vid -= 1

@@ -1,6 +1,5 @@
 from . import v1, response
 from .. import db
-from pprika import request
 from datetime import datetime
 from ..exception import ForbiddenWord
 from ..exception import NotFound

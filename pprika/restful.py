@@ -3,7 +3,6 @@ from functools import partial
 from .context import request
 from .helpers import make_response
 from werkzeug.exceptions import HTTPException
-from werkzeug.exceptions import MethodNotAllowed
 from sys import exc_info
 from traceback import print_exception
 from werkzeug.datastructures import FileStorage
@@ -70,6 +69,7 @@ class Api(Blueprint):
         若错误来自api内部，则以自带处理器处理
         否则交由源(app)处理器处理
         通过重写(override)该方法可扩大handle_error处理范围
+        404/405类路由错误 request.__load__ 还未执行，blueprint为None，不被认为是Api内的错误
         """
         if request.blueprint == self.name:
             return self.handle_error(e)
@@ -117,7 +117,7 @@ class Resource(object):
     用法：继承该类，并添加与method同名的视图函数作为其方法
     将视图函数的装饰器作为列表赋给 cls.decorators，对该Resource内所有方法都适用
 
-    注意：当被路由时若无对应method的方法将自动引发 405 Method Not Allowed
+    注意：当被路由时若无对应method的方法将导致 405 Method Not Allowed
     且类里除了视图函数以外不宜有其他方法，尤其是名字里带下划线 "_" 的
     该类初始化(__init__调用时)暂不支持传参
     """
@@ -170,6 +170,10 @@ class Argument(object):
     """
     对某一请求参数格式要求的抽象
     调用parse方法可以获得按要求解析的值
+
+    dest：参数解析后在Namespace里对应的键名，相当于换了个名字
+    location：该参数所处位置/格式，如queryString、requestBody之类的，其中靠后的优先(多值时会覆盖前面的)
+    nullable：允不允许请求中的参数值为Null(None)
     """
 
     def __init__(self, name, dest=None, default=None, required=False,
@@ -213,7 +217,7 @@ class Argument(object):
         """根据全局变量request解析参数，也可将自定义的request作为参数req传入"""
 
         values = []  # 同一个loc、多个loc都可能造成一键多值
-        result = None  # 但仅返回所有合法值的最后一个
+        result = None  # 但仅返回所有合法值的最后一个，因此location中靠后的更优先
 
         for loc in self.location:
             value = getattr(req, loc, None)
@@ -223,7 +227,7 @@ class Argument(object):
             if not value:  # 该location无任何参数
                 continue
 
-            if hasattr(value, "getlist"):  # 此时value为MultiDict
+            if hasattr(value, "getlist"):  # 此时value为werkzeug.datastructures.MultiDict
                 value = value.getlist(self.name)  # 返回列表
             else:
                 value = value.get(self.name)
@@ -251,6 +255,7 @@ class Argument(object):
                 return self.default(), None
             else:
                 return self.default, None
+
         return result, None  # None表示无错误信息
 
 
@@ -267,12 +272,13 @@ class RequestParser(object):
     @staticmethod
     def get_all_args(req):
         """
-        返回 req 所有参数的key，之后每parse一个就弹出
+        返回 req 较有可能是参数的key，之后每parse一个就弹出
         若最后不为空则说明请求中含有多余的参数
         """
 
         arg_keys = set()
         for loc in ['json', 'values', 'files']:
+            # request并不都是请求参数，如cookies、headers部分键值是每次请求都固定的
             value = getattr(req, loc, None)
 
             if not value:
@@ -286,7 +292,7 @@ class RequestParser(object):
     def add_argument(self, name, **kwargs):
         """
         添加一个参数以待解析
-        注意：在视图函数中add的参数对其他视图无影响，因为每次请求Api实例都重新构造
+        注意：在视图函数中add的参数对其他视图无影响，因为每次请求Resource实例都重新构造
 
         :param name：可以是参数名或Argument实例
         """
@@ -309,7 +315,7 @@ class RequestParser(object):
 
         namespace = Namespace()
         errors = {}
-        req.arg_keys = self.get_all_args(req)
+        req.arg_keys = self.get_all_args(req) if strict else {}
 
         for arg in self.args:
             value, msg = arg.parse(req, self.bundle_errors)  # 若bundle_errors为False，异常将直接抛出

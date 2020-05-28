@@ -29,10 +29,10 @@ class PPrika(object):
         WSGI app，接受 __call__ / 前方server 调用，处理所有请求的入口
         匹配、处理请求并返回响应结果，捕捉、处理异常
         """
-        ctx = RequestContext(self, environ)
+        ctx = RequestContext(self, environ)  # 请求上下文对象
         try:
             try:
-                ctx.bind()
+                ctx.bind()  # 绑定请求上下文并匹配路由
                 rv = self.dispatch_request()
                 response = make_response(rv)
             except Exception as e:
@@ -44,7 +44,7 @@ class PPrika(object):
     def __call__(self, environ, start_response):
         return self.wsgi_app(environ, start_response)
 
-    def run(self, host='localhost', port=6000, **options):
+    def run(self, host='localhost', port=9000, **options):
         """
         以 werkzeug 提供的服务器启动该应用实例
         以run_simple的 use_reloader、use_debugger 实现灵活的debug
@@ -56,7 +56,7 @@ class PPrika(object):
         """
         类似于flask的同名函数 `add_url_rule`，但仅实现了最基本的功能
         将一个url rule注册到对应的endpoint上，并把endpoint关联到处理函数view_func上
-        借助endpoint实现url与func多对一，其中url与endpoint一对一，endpoint与view_func一对一
+        借助endpoint实现path与func多对一，其中path与endpoint多对一，endpoint与view_func一对一
         """
         if endpoint is None:
             assert view_func is not None, "无endpoint时view_func不可为空"
@@ -64,7 +64,7 @@ class PPrika(object):
 
         methods = options.pop('methods', '') or ("GET",)
         if isinstance(methods, str):
-            # 即允许了类似methods="POST"
+            # 即允许了类似methods="POST"的method指定方式
             methods = (methods,)
         methods = set(item.upper() for item in methods)
 
@@ -91,7 +91,7 @@ class PPrika(object):
 
     def dispatch_request(self):
         """
-        接受 'wsgi_app'的调用，通过请求上下文进行url匹配，得到对应endpoint与函数参数args
+        接受 'wsgi_app'的调用，通过请求上下文得到对应endpoint与函数参数args
         再以endpoint作为键值得到处理该url的视图函数，传入args，返回函数结果
         """
         if request.routing_exception is not None:
@@ -146,9 +146,9 @@ class PPrika(object):
 
     def _find_error_handler(self, e):
         """
-        按照code优先、蓝图次要的顺序为寻找异常处理函数：
-        蓝图 with code，全局 with code
-        蓝图 without code，全局 without code
+        按照code优先、field次要的顺序为寻找异常处理函数：
+        1.蓝图 with code，2.全局 with code
+        3.蓝图 without code，4.全局 without code
         若没有匹配的处理函数则返回None
         """
         exc_class, code = self._get_exc_class_and_code(type(e))
@@ -168,7 +168,7 @@ class PPrika(object):
             if not handler_map:
                 continue
 
-            for cls in exc_class.__mro__:
+            for cls in exc_class.__mro__:  # 以该异常类的继承顺序尝试获取自身及父类的handler
                 handler = handler_map.get(cls)
                 if handler is not None:
                     return handler

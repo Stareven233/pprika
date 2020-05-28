@@ -27,6 +27,11 @@ class Blueprint(object):
         """
         path = "/".join((self.url_prefix.rstrip("/"), path.lstrip("/")))
 
+        if view_func and hasattr(view_func, "__name__"):
+            assert (
+                "." not in view_func.__name__
+            ), '视图函数名不应带"."'
+
         if endpoint:
             assert "." not in endpoint, 'endpoint参数不可带"."'
         if endpoint is None:
@@ -34,10 +39,6 @@ class Blueprint(object):
             endpoint = view_func.__name__
         endpoint = f'{self.name}.{endpoint}'
 
-        if view_func and hasattr(view_func, "__name__"):
-            assert (
-                "." not in view_func.__name__
-            ), '视图函数名不应带"."'
         # 函数通过deferred_funcs转发，等到有了app再执行(注册rule)
         self._deferred_funcs.append(
             lambda a: a.add_url_rule(path, endpoint, view_func, **options)

@@ -44,7 +44,7 @@ class Login(Resource):
             raise LackOfInfo()
 
         if args.name not in db['users']:
-            raise NotFound(message='不存在该用户，请先注册')
+            raise NotFound('不存在该用户，请先注册')
 
         if args.pwd != db['users'][args.name]['password']:
             raise PwdError()

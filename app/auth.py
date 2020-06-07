@@ -9,15 +9,15 @@ from functools import wraps
 
 def generate_token(name, expiration=3600):
     s = Serializer('Config.SECRET_KEY', expires_in=expiration)
-    # return s.dumps({'name': name, 'time': time()}).decode()
-    return s.dumps({'name': name}).decode()
+    return s.dumps({'name': name, 'time': time()}).decode()
+    # return s.dumps({'name': name}).decode()
 
 
 def verify_token(token):
     s = Serializer('Config.SECRET_KEY')
     try:
         data = s.loads(token.encode())
-    except (SignatureExpired, BadSignature):
+    except (SignatureExpired, BadSignature, AttributeError):
         return None
     return data['name']
 

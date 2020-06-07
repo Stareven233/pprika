@@ -24,9 +24,9 @@ class ApiException(Exception):
     status = None
     message = None
 
-    def __init__(self, status=None, message=None):
-        self.status = status or self.status
+    def __init__(self, message=None, status=None):
         self.message = message or self.message
+        self.status = status or self.status  # 大多数时候都是修改message的，放前面
 
     def get_response(self):
         body = {'message': self.message}
@@ -85,9 +85,9 @@ class Api(Blueprint):
         if isinstance(e, self.exception_cls):
             pass
         elif isinstance(e, HTTPException):
-            e = self.exception_cls(e.code, e.description)
+            e = self.exception_cls(e.description, e.code)
         elif isinstance(e, ApiException):
-            e = self.exception_cls(e.status, e.message)
+            e = self.exception_cls(e.message, e.status)
         else:
             print_exception(*exc_info())
             e = self.exception_cls(500, repr(e))
@@ -211,7 +211,7 @@ class Argument(object):
         msg = {self.name: str(error)}
         if bundle_errors:
             return error, msg
-        raise ApiException(status=400, message=msg)
+        raise ApiException(message=msg, status=400)
 
     def parse(self, req, bundle_errors=False):
         """根据全局变量request解析参数，也可将自定义的request作为参数req传入"""
@@ -315,7 +315,7 @@ class RequestParser(object):
 
         namespace = Namespace()
         errors = {}
-        req.arg_keys = self.get_all_args(req) if strict else {}
+        req.arg_keys = self.get_all_args(req) if strict else set()
 
         for arg in self.args:
             value, msg = arg.parse(req, self.bundle_errors)  # 若bundle_errors为False，异常将直接抛出
@@ -326,9 +326,9 @@ class RequestParser(object):
                 errors.update(msg)
 
         if errors:
-            raise ApiException(status=http_error_code, message=errors)  # errors将以json响应
+            raise ApiException(message=errors, status=http_error_code)  # errors将以json响应
         if strict and req.arg_keys:
             msg = '未知参数: %s' % ', '.join(req.arg_keys)
-            raise ApiException(status=400, message=msg)
+            raise ApiException(message=msg, status=400)
 
         return namespace

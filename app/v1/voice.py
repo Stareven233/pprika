@@ -79,7 +79,7 @@ class Voice(Resource):
         try:
             voice = voices[vid]
         except IndexError:
-            raise NotFound(message='不存在该vid对应的voice')
+            raise NotFound('不存在该vid对应的voice')
 
         if voice['private'] and voice['uname'] != db['g']['user']['name']:
             raise PrivateVoice()
@@ -97,10 +97,10 @@ class Voice(Resource):
         try:
             voice = voices[vid]
         except IndexError:
-            raise NotFound(message='不可修改不存在的voice')
+            raise NotFound('不可修改不存在的voice')
 
         if voice['uname'] != db['g']['user']['name']:
-            raise PrivateVoice(message='不可修改其他用户的voice')
+            raise PrivateVoice('不可修改其他用户的voice')
 
         data = voices[vid]
         data['date'] = str(datetime.now())
@@ -115,10 +115,10 @@ class Voice(Resource):
         try:
             voice = voices[vid]
         except IndexError:
-            raise NotFound(message='不可删除不存在的voice')
+            raise NotFound('不可删除不存在的voice')
 
         if voice['uname'] != db['g']['user']['name']:
-            raise PrivateVoice(message='不可删除其他用户的voice')
+            raise PrivateVoice('不可删除其他用户的voice')
 
         voice = voices.pop(vid)
         return response(voice), 200

@@ -5,8 +5,8 @@ from pprika import make_response
 class CustomException(ApiException):
     code = None
 
-    def __init__(self, status=None, message=None):
-        super().__init__(status, message)
+    def __init__(self, message=None, status=None):
+        super().__init__(message, status)
         self.code = self.code or status
 
     def get_response(self):
